@@ -708,7 +708,7 @@ function buildFallbackData() {
 
 // Determine API base URL based on environment
 // Local development: http://127.0.0.1:8000 (explicit backend URL)
-// Deployed on Render: use same domain with Nginx proxy (empty string means use /api/ on same host)
+// Deployed on Render: https://kid-progress-dashboard.onrender.com (full URL for cross-domain calls)
 const API_BASE = (() => {
   const hostname = window.location.hostname;
   
@@ -717,9 +717,9 @@ const API_BASE = (() => {
     return "http://127.0.0.1:8000";
   }
   
-  // Production: use empty string for relative path
-  // Nginx will proxy /api/* requests to the Python backend on port 8000
-  return "";
+  // Production: use Render backend URL
+  // This ensures API calls go directly to the backend service
+  return "https://kid-progress-dashboard.onrender.com";
 })()
 
 function formatDate(dateText) {
