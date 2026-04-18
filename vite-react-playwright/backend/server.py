@@ -585,7 +585,10 @@ def build_dashboard_payload() -> dict:
 if __name__ == "__main__":
     init_db()
     server = ThreadingHTTPServer((HOST, PORT), ProgressHandler)
-    print(f"Kid progress backend running on http://{HOST}:{PORT}")
+    # Print the correct URL based on environment
+    backend_url = os.environ.get("BACKEND_URL", f"http://{HOST}:{PORT}")
+    print(f"Kid progress backend running on {backend_url}")
+    print(f"  Binding to: {HOST}:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
