@@ -41,6 +41,7 @@ playwright-report/
 Thumbs.db
 .AppleDouble
 .LSOverride
+.swift-module-cache
 
 # Temporary files
 *.tmp
