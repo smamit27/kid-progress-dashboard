@@ -707,11 +707,11 @@ function buildFallbackData() {
 }
 
 // Use relative path for API calls (works with Nginx proxy on same domain)
-// Local development: http://localhost:8000 (will be proxied by vite dev server)
-// Deployed: https://app.onrender.com (Nginx proxies /api/ to :8000)
-const API_BASE = window.location.hostname === "localhost" 
+// Local development: http://127.0.0.1:8000 (explicit backend URL)
+// Deployed: "" (empty string - uses same domain, Nginx proxies /api/ to :8000)
+const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
   ? "http://127.0.0.1:8000" 
-  : "";
+  : ""; // Production: use relative path (Nginx proxy)
 
 function formatDate(dateText) {
   return parseLocalDate(dateText).toLocaleDateString("en-IN", {
