@@ -706,12 +706,21 @@ function buildFallbackData() {
   };
 }
 
-// Use relative path for API calls (works with Nginx proxy on same domain)
+// Determine API base URL based on environment
 // Local development: http://127.0.0.1:8000 (explicit backend URL)
-// Deployed: "" (empty string - uses same domain, Nginx proxies /api/ to :8000)
-const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
-  ? "http://127.0.0.1:8000" 
-  : ""; // Production: use relative path (Nginx proxy)
+// Deployed on Render: use same domain with Nginx proxy (empty string means use /api/ on same host)
+const API_BASE = (() => {
+  const hostname = window.location.hostname;
+  
+  // Local development
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "http://127.0.0.1:8000";
+  }
+  
+  // Production: use empty string for relative path
+  // Nginx will proxy /api/* requests to the Python backend on port 8000
+  return "";
+})()
 
 function formatDate(dateText) {
   return parseLocalDate(dateText).toLocaleDateString("en-IN", {
