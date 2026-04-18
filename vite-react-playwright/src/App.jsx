@@ -707,20 +707,28 @@ function buildFallbackData() {
 }
 
 // Determine API base URL based on environment
-// Local development: http://127.0.0.1:8000 (explicit backend URL)
-// Deployed on Render: https://kid-progress-dashboard.onrender.com (full URL for cross-domain calls)
+// IMPORTANT: This MUST use the production URL when deployed
+// Do NOT use empty string or relative paths - they won't work with CORS
 const API_BASE = (() => {
   const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
   
-  // Local development
+  console.log("🔍 DEBUG: hostname =", hostname, "protocol =", protocol);
+  
+  // Local development only
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return "http://127.0.0.1:8000";
+    const localUrl = "http://127.0.0.1:8000";
+    console.log("✅ LOCAL MODE: Using", localUrl);
+    return localUrl;
   }
   
-  // Production: use Render backend URL
-  // This ensures API calls go directly to the backend service
-  return "https://kid-progress-dashboard.onrender.com";
+  // Production: ALWAYS use full HTTPS URL for Render
+  const productionUrl = "https://kid-progress-dashboard.onrender.com";
+  console.log("✅ PRODUCTION MODE: Using", productionUrl);
+  return productionUrl;
 })()
+
+console.log("📡 API_BASE initialized as:", API_BASE);
 
 function formatDate(dateText) {
   return parseLocalDate(dateText).toLocaleDateString("en-IN", {
