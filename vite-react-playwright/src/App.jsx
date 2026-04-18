@@ -717,7 +717,7 @@ const API_BASE = (() => {
   
   // Local development only
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    const localUrl = "http://127.0.0.1:8000";
+    const localUrl = "https://kid-progress-dashboard.onrender.com";
     console.log("✅ LOCAL MODE: Using", localUrl);
     return localUrl;
   }
