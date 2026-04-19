@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
+import { db, auth } from "./firebase";
+import { collection, addDoc, getDocs, doc, getDoc, setDoc, query, orderBy } from "firebase/firestore";
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "firebase/auth";
 
 const FINAL_CLASS_LEVEL = 12;
 const DEFAULT_SETTINGS = {
@@ -627,10 +630,27 @@ function getClassPlan(currentClass) {
   };
 }
 
-function buildFallbackData() {
-  const settings = { ...DEFAULT_SETTINGS };
+function buildFallbackData(customSettings = null, customFeeHistoryMap = null, customParentNotes = null) {
+  const settings = customSettings || { ...DEFAULT_SETTINGS };
   const schoolYear = calculateSchoolYear(new Date(), settings);
-  const feeHistory = buildFeeHistory(settings, schoolYear, DEFAULT_MONTHLY_FEE);
+  
+  let feeHistory = buildFeeHistory(settings, schoolYear, DEFAULT_MONTHLY_FEE);
+  if (customFeeHistoryMap) {
+    feeHistory = feeHistory.map(entry => {
+      const feeData = customFeeHistoryMap[entry.month_key];
+      if (feeData) {
+        // Handle both new JSON object format and old string format
+        const status = typeof feeData === "object" ? feeData.status : feeData;
+        const paid_on = typeof feeData === "object" ? feeData.paid_on : (status === "Paid" ? entry.paid_on || formatIsoDate(new Date()) : null);
+        return { ...entry, status, paid_on };
+      }
+      return entry;
+    });
+  }
+
+  const paid_total = feeHistory.filter((entry) => entry.status === "Paid").reduce((sum, entry) => sum + entry.amount, 0);
+  const yearly_total = feeHistory.reduce((sum, entry) => sum + entry.amount, 0);
+
   return {
     profile: {
       child_name: "Amishi Singh",
@@ -649,9 +669,9 @@ function buildFallbackData() {
     class_timeline: buildTimeline(settings, DEFAULT_BIRTH_DATE),
     fee_summary: {
       school_year: schoolYear,
-      yearly_total: DEFAULT_MONTHLY_FEE * 12,
-      paid_total: 0,
-      unpaid_total: DEFAULT_MONTHLY_FEE * 12,
+      yearly_total: yearly_total,
+      paid_total: paid_total,
+      unpaid_total: yearly_total - paid_total,
       history: feeHistory,
     },
     summaries: [
@@ -691,7 +711,7 @@ function buildFallbackData() {
       { id: 3, entry_date: "2026-04-14", category: "Home", detail: "Counted fruit pieces at snack time and got to 24 correctly." },
       { id: 4, entry_date: "2026-04-13", category: "School", detail: "Matched picture cards to beginning sounds and loved story time." },
     ],
-    parent_notes: [
+    parent_notes: customParentNotes || [
       { id: 1, note: "Celebrate effort, not speed.", category: "Mindset", created_at: "2026-04-16T10:30:00Z" },
       { id: 2, note: "Review school readiness every quarter, not every day.", category: "Planning", created_at: "2026-04-15T10:30:00Z" },
       { id: 3, note: "Keep one weekend block free for family outings and open play.", category: "Balance", created_at: "2026-04-14T10:30:00Z" },
@@ -699,36 +719,12 @@ function buildFallbackData() {
     teacher_notes: DEFAULT_TEACHER_NOTES,
     report_cards: DEFAULT_REPORT_CARDS,
     meta: {
-      last_updated: "2026-04-17T10:00:00Z",
-      data_mode: "sample",
+      last_updated: new Date().toISOString(),
+      data_mode: "firebase",
       promotion_rule: "Class updates every year on 1 April. First move to Class 1 starts in 2027. Fees are due on day 1 of each month.",
     },
   };
 }
-
-// Determine API base URL based on environment
-// IMPORTANT: This MUST use the production URL when deployed
-// Do NOT use empty string or relative paths - they won't work with CORS
-const API_BASE = (() => {
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  
-  console.log("🔍 DEBUG: hostname =", hostname, "protocol =", protocol);
-  
-  // Local development only
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    const localUrl = "http://localhost:8000";
-    console.log("✅ LOCAL MODE: Using", localUrl);
-    return localUrl;
-  }
-  
-  // Production: ALWAYS use full HTTPS URL for Render
-  const productionUrl = "https://kid-progress-dashboard.onrender.com";
-  console.log("✅ PRODUCTION MODE: Using", productionUrl);
-  return productionUrl;
-})()
-
-console.log("📡 API_BASE initialized as:", API_BASE);
 
 function formatDate(dateText) {
   return parseLocalDate(dateText).toLocaleDateString("en-IN", {
@@ -742,6 +738,9 @@ function statusClass(status) {
 }
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+
   const [dashboard, setDashboard] = useState(buildFallbackData());
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState("idle");
@@ -751,6 +750,43 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [activeSubjectTab, setActiveSubjectTab] = useState(null);
   const [theme, setTheme] = useState("light");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoadingAuth(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSignIn = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const u = result.user;
+
+      // Store user profile in Firestore (Google-compliant: only essential data)
+      await setDoc(doc(db, "users", u.uid), {
+        uid: u.uid,
+        email: u.email,
+        displayName: u.displayName || "",
+        photoURL: u.photoURL || "",
+        lastLoginAt: new Date().toISOString(),
+      }, { merge: true });
+
+    } catch (error) {
+      console.error("Error signing in:", error);
+      alert("Sign-in failed: " + error.message);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  };
 
   // Theme switching effect
   useEffect(() => {
@@ -770,16 +806,32 @@ export default function App() {
 
     async function loadDashboard() {
       try {
-        const response = await fetch(`${API_BASE}/api/dashboard`);
-        if (!response.ok) {
-          throw new Error("Unable to load dashboard");
+        let customSettings = null;
+        let customFeeHistoryMap = null;
+        let customParentNotes = null;
+
+        const settingsDoc = await getDoc(doc(db, "app_data", "settings"));
+        if (settingsDoc.exists()) {
+          customSettings = settingsDoc.data();
         }
-        const data = await response.json();
+
+        const feesDoc = await getDoc(doc(db, "app_data", "fees"));
+        if (feesDoc.exists()) {
+          customFeeHistoryMap = feesDoc.data();
+        }
+
+        const notesSnapshot = await getDocs(query(collection(db, "parent_notes"), orderBy("created_at", "desc")));
+        if (!notesSnapshot.empty) {
+          customParentNotes = notesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
         if (active) {
-          setDashboard(data);
-          setSettingsForm(data.settings);
+          const dashboardData = buildFallbackData(customSettings, customFeeHistoryMap, customParentNotes);
+          setDashboard(dashboardData);
+          setSettingsForm(dashboardData.settings);
         }
-      } catch {
+      } catch (error) {
+        console.error("Firebase load error:", error);
         if (active) {
           const fallback = buildFallbackData();
           setDashboard(fallback);
@@ -805,25 +857,23 @@ export default function App() {
     }
 
     setSaveState("saving");
+    const createdAt = new Date().toISOString();
+    const newNote = { id: Date.now(), note, category: "Parent note", created_at: createdAt };
+    
     try {
-      const response = await fetch(`${API_BASE}/api/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note, category: "Parent note" }),
-      });
-      if (!response.ok) {
-        throw new Error("Unable to save note");
-      }
-      const data = await response.json();
-      setDashboard(data);
-      setSettingsForm(data.settings);
-      setNote("");
-      setSaveState("saved");
-    } catch {
-      const createdAt = new Date().toISOString();
+      await addDoc(collection(db, "parent_notes"), newNote);
+      
       setDashboard((current) => ({
         ...current,
-        parent_notes: [{ id: Date.now(), note, category: "Parent note", created_at: createdAt }, ...current.parent_notes].slice(0, 6),
+        parent_notes: [newNote, ...current.parent_notes].slice(0, 6),
+      }));
+      setNote("");
+      setSaveState("saved");
+    } catch (error) {
+      console.error("Firebase save error:", error);
+      setDashboard((current) => ({
+        ...current,
+        parent_notes: [newNote, ...current.parent_notes].slice(0, 6),
       }));
       setNote("");
       setSaveState("saved-offline");
@@ -833,27 +883,32 @@ export default function App() {
   async function handleSettingsSubmit(event) {
     event.preventDefault();
     setSettingsState("saving");
+    
+    const mergedSettings = {
+      promotion_month: Number(settingsForm.promotion_month),
+      promotion_day: Number(settingsForm.promotion_day),
+      first_class_year: Number(settingsForm.first_class_year),
+      fee_due_day: Number(settingsForm.fee_due_day),
+    };
+
     try {
-      const response = await fetch(`${API_BASE}/api/settings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settingsForm),
+      await setDoc(doc(db, "app_data", "settings"), mergedSettings);
+
+      setDashboard((current) => {
+        const feeStatusMap = {};
+        current.fee_summary.history.forEach(entry => {
+          feeStatusMap[entry.month_key] = { status: entry.status, paid_on: entry.paid_on };
+        });
+        
+        const newData = buildFallbackData(mergedSettings, feeStatusMap, current.parent_notes);
+        setSettingsForm(newData.settings);
+        return newData;
       });
-      if (!response.ok) {
-        throw new Error("Unable to save settings");
-      }
-      const data = await response.json();
-      setDashboard(data);
-      setSettingsForm(data.settings);
+
       setSettingsState("saved");
-    } catch {
+    } catch (error) {
+      console.error("Firebase settings save error:", error);
       const offline = buildFallbackData();
-      const mergedSettings = {
-        promotion_month: Number(settingsForm.promotion_month),
-        promotion_day: Number(settingsForm.promotion_day),
-        first_class_year: Number(settingsForm.first_class_year),
-        fee_due_day: Number(settingsForm.fee_due_day),
-      };
       const schoolYear = calculateSchoolYear(new Date(), mergedSettings);
       setDashboard({
         ...offline,
@@ -883,18 +938,32 @@ export default function App() {
 
   async function handleFeeStatusChange(monthKey, status) {
     try {
-      const response = await fetch(`${API_BASE}/api/fees`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month_key: monthKey, status }),
+      const paid_on = status === "Paid" ? formatIsoDate(new Date()) : null;
+      await setDoc(doc(db, "app_data", "fees"), {
+        [monthKey]: { status, paid_on }
+      }, { merge: true });
+
+      setDashboard((current) => {
+        const history = current.fee_summary.history.map((entry) =>
+          entry.month_key === monthKey
+            ? { ...entry, status, paid_on: status === "Paid" ? formatIsoDate(new Date()) : null }
+            : entry,
+        );
+        const paidTotal = history.filter((entry) => entry.status === "Paid").reduce((sum, entry) => sum + entry.amount, 0);
+        const yearlyTotal = history.reduce((sum, entry) => sum + entry.amount, 0);
+        return {
+          ...current,
+          fee_summary: {
+            ...current.fee_summary,
+            history,
+            paid_total: paidTotal,
+            unpaid_total: yearlyTotal - paidTotal,
+            yearly_total: yearlyTotal,
+          },
+        };
       });
-      if (!response.ok) {
-        throw new Error("Unable to update fee status");
-      }
-      const data = await response.json();
-      setDashboard(data);
-      setSettingsForm(data.settings);
-    } catch {
+    } catch (error) {
+      console.error("Firebase fee update error:", error);
       setDashboard((current) => {
         const history = current.fee_summary.history.map((entry) =>
           entry.month_key === monthKey
@@ -962,6 +1031,37 @@ export default function App() {
     [classPlan.tabLabel],
   );
 
+  if (loadingAuth) {
+    return (
+      <div className="portal-shell">
+        <section className="hero">
+          <div className="hero-copy">
+            <h1>Loading...</h1>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="portal-shell">
+        <section className="hero" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="hero-copy" style={{ textAlign: "center", maxWidth: "400px" }}>
+            <p className="eyebrow">Secure Access</p>
+            <h1>Welcome Back</h1>
+            <p className="subtitle">Please sign in to view your Kid Progress Dashboard.</p>
+            <div className="hero-actions" style={{ justifyContent: "center", marginTop: "2rem" }}>
+              <button type="button" onClick={handleSignIn} style={{ width: "100%", padding: "1rem" }}>
+                Sign in with Google
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="portal-shell">
       <section className="hero">
@@ -977,6 +1077,7 @@ export default function App() {
           <div className="hero-actions">
             <button type="button" onClick={() => setActiveTab("notes")}>Add parent note</button>
             <button type="button" className="ghost-button" onClick={() => setActiveTab("settings")}>Open settings</button>
+            <button type="button" className="table-button" style={{ backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border-color)", alignSelf: "center", marginLeft: "1rem" }} onClick={handleSignOut}>Sign Out</button>
             
             <div className="theme-switcher" style={{ display: "flex", gap: "8px", alignItems: "center", marginLeft: "auto" }}>
               <span style={{ fontSize: "0.9rem", color: "rgba(255, 248, 242, 0.7)" }}>Theme:</span>
