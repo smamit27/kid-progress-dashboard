@@ -630,11 +630,16 @@ function getClassPlan(currentClass) {
   };
 }
 
-function buildFallbackData(customSettings = null, customFeeHistoryMap = null, customParentNotes = null) {
+function buildFallbackData(customSettings = null, customFeeHistoryMap = null, customParentNotes = null, kidProfile = null) {
   const settings = customSettings || { ...DEFAULT_SETTINGS };
   const schoolYear = calculateSchoolYear(new Date(), settings);
-  
-  let feeHistory = buildFeeHistory(settings, schoolYear, DEFAULT_MONTHLY_FEE);
+  const childName = kidProfile?.child_name || "Your Child";
+  const birthDate = kidProfile?.birth_date || DEFAULT_BIRTH_DATE;
+  const monthlyFee = kidProfile?.monthly_fee ? Number(kidProfile.monthly_fee) : DEFAULT_MONTHLY_FEE;
+  const startClass = kidProfile?.start_class || "Prep";
+  const focusMessage = kidProfile?.focus_message || "Build joyful routines, language confidence, and early number sense.";
+
+  let feeHistory = buildFeeHistory(settings, schoolYear, monthlyFee);
   if (customFeeHistoryMap) {
     feeHistory = feeHistory.map(entry => {
       const feeData = customFeeHistoryMap[entry.month_key];
@@ -653,20 +658,20 @@ function buildFallbackData(customSettings = null, customFeeHistoryMap = null, cu
 
   return {
     profile: {
-      child_name: "Amishi Singh",
-      start_class: "Prep",
+      child_name: childName,
+      start_class: startClass,
       current_class: calculateCurrentClass(new Date(), settings),
-      age: calculateAge(new Date(), DEFAULT_BIRTH_DATE),
+      age: calculateAge(new Date(), birthDate),
       school_year: schoolYear,
-      focus_message: "Build joyful routines, language confidence, and early number sense.",
-      photo_path: "/images/amishi.jpg",
-      birth_date: DEFAULT_BIRTH_DATE,
-      monthly_fee: DEFAULT_MONTHLY_FEE,
-      payment_frequency: DEFAULT_PAYMENT_FREQUENCY,
+      focus_message: focusMessage,
+      photo_path: kidProfile?.photo_path || "/images/amishi.jpg",
+      birth_date: birthDate,
+      monthly_fee: monthlyFee,
+      payment_frequency: kidProfile?.payment_frequency || DEFAULT_PAYMENT_FREQUENCY,
       next_promotion_date: getNextPromotionDate(new Date(), settings),
     },
     settings,
-    class_timeline: buildTimeline(settings, DEFAULT_BIRTH_DATE),
+    class_timeline: buildTimeline(settings, birthDate),
     fee_summary: {
       school_year: schoolYear,
       yearly_total: yearly_total,
@@ -740,6 +745,17 @@ function statusClass(status) {
 export default function App() {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  const [kidProfile, setKidProfile] = useState(null);
+  const [showSetup, setShowSetup] = useState(false);
+  const [setupForm, setSetupForm] = useState({
+    child_name: "",
+    birth_date: "",
+    start_class: "Prep",
+    monthly_fee: "11550",
+    focus_message: "Build joyful routines, language confidence, and early number sense.",
+  });
 
   const [dashboard, setDashboard] = useState(buildFallbackData());
   const [loading, setLoading] = useState(true);
@@ -774,6 +790,10 @@ export default function App() {
         lastLoginAt: new Date().toISOString(),
       }, { merge: true });
 
+      // Show personalized welcome popup
+      setShowWelcome(true);
+      setTimeout(() => setShowWelcome(false), 3500);
+
     } catch (error) {
       console.error("Error signing in:", error);
       alert("Sign-in failed: " + error.message);
@@ -785,6 +805,33 @@ export default function App() {
       await signOut(auth);
     } catch (error) {
       console.error("Error signing out:", error);
+    }
+  };
+
+  const handleSetupSubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const profile = {
+        child_name: setupForm.child_name.trim(),
+        birth_date: setupForm.birth_date,
+        start_class: setupForm.start_class,
+        monthly_fee: Number(setupForm.monthly_fee),
+        focus_message: setupForm.focus_message.trim(),
+        created_at: new Date().toISOString(),
+      };
+      await setDoc(doc(db, "app_data", "kid_profile"), profile);
+      setKidProfile(profile);
+      setShowSetup(false);
+      setLoading(true);
+
+      // Reload dashboard with new profile
+      const dashboardData = buildFallbackData(null, null, null, profile);
+      setDashboard(dashboardData);
+      setSettingsForm(dashboardData.settings);
+      setLoading(false);
+    } catch (error) {
+      console.error("Error saving kid profile:", error);
+      alert("Failed to save: " + error.message);
     }
   };
 
@@ -809,6 +856,21 @@ export default function App() {
         let customSettings = null;
         let customFeeHistoryMap = null;
         let customParentNotes = null;
+        let loadedKidProfile = null;
+
+        // Load kid profile
+        const kidDoc = await getDoc(doc(db, "app_data", "kid_profile"));
+        if (kidDoc.exists()) {
+          loadedKidProfile = kidDoc.data();
+          setKidProfile(loadedKidProfile);
+        } else {
+          // No kid profile yet — show setup form
+          if (active) {
+            setShowSetup(true);
+            setLoading(false);
+          }
+          return;
+        }
 
         const settingsDoc = await getDoc(doc(db, "app_data", "settings"));
         if (settingsDoc.exists()) {
@@ -826,7 +888,7 @@ export default function App() {
         }
 
         if (active) {
-          const dashboardData = buildFallbackData(customSettings, customFeeHistoryMap, customParentNotes);
+          const dashboardData = buildFallbackData(customSettings, customFeeHistoryMap, customParentNotes, loadedKidProfile);
           setDashboard(dashboardData);
           setSettingsForm(dashboardData.settings);
         }
@@ -900,7 +962,7 @@ export default function App() {
           feeStatusMap[entry.month_key] = { status: entry.status, paid_on: entry.paid_on };
         });
         
-        const newData = buildFallbackData(mergedSettings, feeStatusMap, current.parent_notes);
+        const newData = buildFallbackData(mergedSettings, feeStatusMap, current.parent_notes, kidProfile);
         setSettingsForm(newData.settings);
         return newData;
       });
@@ -1037,6 +1099,99 @@ export default function App() {
         <section className="hero">
           <div className="hero-copy">
             <h1>Loading...</h1>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (showWelcome && user) {
+    return (
+      <div className="portal-shell">
+        <section className="hero" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="hero-copy" style={{ textAlign: "center", maxWidth: "420px" }}>
+            <div style={{
+              width: "96px", height: "96px", borderRadius: "50%", margin: "0 auto 1.5rem",
+              border: "4px solid rgba(255,255,255,0.3)", overflow: "hidden",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+              animation: "fadeInScale 0.6s ease-out"
+            }}>
+              <img src={user.photoURL || ""} alt={user.displayName || "User"}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                onError={(e) => { e.target.style.display = "none"; }}
+              />
+            </div>
+            <p className="eyebrow" style={{ animation: "fadeInScale 0.6s ease-out 0.2s both" }}>Welcome</p>
+            <h1 style={{ animation: "fadeInScale 0.6s ease-out 0.3s both" }}>{user.displayName || "there"} 👋</h1>
+            <p className="subtitle" style={{ animation: "fadeInScale 0.6s ease-out 0.4s both" }}>{user.email}</p>
+            <p className="subtitle" style={{ marginTop: "1.5rem", opacity: 0.7, fontSize: "0.85rem", animation: "fadeInScale 0.6s ease-out 0.5s both" }}>Loading your dashboard...</p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (showSetup && user) {
+    return (
+      <div className="portal-shell">
+        <section className="hero" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="hero-copy" style={{ textAlign: "center", maxWidth: "480px", width: "100%" }}>
+            <p className="eyebrow" style={{ animation: "fadeInScale 0.6s ease-out" }}>First Time Setup</p>
+            <h1 style={{ animation: "fadeInScale 0.6s ease-out 0.1s both" }}>Tell us about your child</h1>
+            <p className="subtitle" style={{ animation: "fadeInScale 0.6s ease-out 0.2s both" }}>This helps us personalize the dashboard just for you.</p>
+
+            <form onSubmit={handleSetupSubmit} style={{ textAlign: "left", marginTop: "2rem", animation: "fadeInScale 0.6s ease-out 0.3s both" }}>
+              <div style={{ marginBottom: "1rem" }}>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontWeight: 600, color: "var(--text-light)", fontSize: "0.9rem" }}>Child&apos;s Name *</label>
+                <input type="text" required value={setupForm.child_name}
+                  onChange={(e) => setSetupForm({ ...setupForm, child_name: e.target.value })}
+                  placeholder="e.g. Amishi Singh"
+                  style={{ width: "100%", padding: "0.75rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", color: "var(--text-light)", fontSize: "1rem", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "1rem" }}>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontWeight: 600, color: "var(--text-light)", fontSize: "0.9rem" }}>Date of Birth *</label>
+                <input type="date" required value={setupForm.birth_date}
+                  onChange={(e) => setSetupForm({ ...setupForm, birth_date: e.target.value })}
+                  style={{ width: "100%", padding: "0.75rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", color: "var(--text-light)", fontSize: "1rem", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "1rem" }}>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontWeight: 600, color: "var(--text-light)", fontSize: "0.9rem" }}>Starting Class</label>
+                <select value={setupForm.start_class}
+                  onChange={(e) => setSetupForm({ ...setupForm, start_class: e.target.value })}
+                  style={{ width: "100%", padding: "0.75rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", color: "var(--text-light)", fontSize: "1rem", boxSizing: "border-box" }}
+                >
+                  <option value="Prep">Prep</option>
+                  <option value="LKG">LKG</option>
+                  <option value="UKG">UKG</option>
+                  {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={`Class ${i + 1}`}>Class {i + 1}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: "1rem" }}>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontWeight: 600, color: "var(--text-light)", fontSize: "0.9rem" }}>Monthly Fee (Rs)</label>
+                <input type="number" value={setupForm.monthly_fee}
+                  onChange={(e) => setSetupForm({ ...setupForm, monthly_fee: e.target.value })}
+                  style={{ width: "100%", padding: "0.75rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", color: "var(--text-light)", fontSize: "1rem", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "1.5rem" }}>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontWeight: 600, color: "var(--text-light)", fontSize: "0.9rem" }}>Focus Message</label>
+                <input type="text" value={setupForm.focus_message}
+                  onChange={(e) => setSetupForm({ ...setupForm, focus_message: e.target.value })}
+                  placeholder="e.g. Build joyful routines and confidence"
+                  style={{ width: "100%", padding: "0.75rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", color: "var(--text-light)", fontSize: "1rem", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <button type="submit" style={{ width: "100%", padding: "1rem", fontSize: "1.05rem", fontWeight: 600 }}>
+                Save &amp; Start Dashboard
+              </button>
+            </form>
           </div>
         </section>
       </div>
