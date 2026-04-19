@@ -819,7 +819,7 @@ export default function App() {
         focus_message: setupForm.focus_message.trim(),
         created_at: new Date().toISOString(),
       };
-      await setDoc(doc(db, "app_data", "kid_profile"), profile);
+      await setDoc(doc(db, "users", user.uid, "data", "kid_profile"), profile);
       setKidProfile(profile);
       setShowSetup(false);
       setLoading(true);
@@ -859,7 +859,7 @@ export default function App() {
         let loadedKidProfile = null;
 
         // Load kid profile
-        const kidDoc = await getDoc(doc(db, "app_data", "kid_profile"));
+        const kidDoc = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "kid_profile"));
         if (kidDoc.exists()) {
           loadedKidProfile = kidDoc.data();
           setKidProfile(loadedKidProfile);
@@ -872,17 +872,17 @@ export default function App() {
           return;
         }
 
-        const settingsDoc = await getDoc(doc(db, "app_data", "settings"));
+        const settingsDoc = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "settings"));
         if (settingsDoc.exists()) {
           customSettings = settingsDoc.data();
         }
 
-        const feesDoc = await getDoc(doc(db, "app_data", "fees"));
+        const feesDoc = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "fees"));
         if (feesDoc.exists()) {
           customFeeHistoryMap = feesDoc.data();
         }
 
-        const notesSnapshot = await getDocs(query(collection(db, "parent_notes"), orderBy("created_at", "desc")));
+        const notesSnapshot = await getDocs(query(collection(db, "users", auth.currentUser.uid, "parent_notes"), orderBy("created_at", "desc")));
         if (!notesSnapshot.empty) {
           customParentNotes = notesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
@@ -923,7 +923,7 @@ export default function App() {
     const newNote = { id: Date.now(), note, category: "Parent note", created_at: createdAt };
     
     try {
-      await addDoc(collection(db, "parent_notes"), newNote);
+      await addDoc(collection(db, "users", user.uid, "parent_notes"), newNote);
       
       setDashboard((current) => ({
         ...current,
@@ -954,7 +954,7 @@ export default function App() {
     };
 
     try {
-      await setDoc(doc(db, "app_data", "settings"), mergedSettings);
+      await setDoc(doc(db, "users", user.uid, "data", "settings"), mergedSettings);
 
       setDashboard((current) => {
         const feeStatusMap = {};
@@ -1001,7 +1001,7 @@ export default function App() {
   async function handleFeeStatusChange(monthKey, status) {
     try {
       const paid_on = status === "Paid" ? formatIsoDate(new Date()) : null;
-      await setDoc(doc(db, "app_data", "fees"), {
+      await setDoc(doc(db, "users", user.uid, "data", "fees"), {
         [monthKey]: { status, paid_on }
       }, { merge: true });
 
